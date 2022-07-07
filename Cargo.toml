@@ -5,13 +5,15 @@ authors = ["Slals <jonathan@blocs.fr>"]
 edition = "2018"
 
 [lib]
+name = "rustshad"
+path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [features]
 default = ["console_error_panic_hook"]
 
 [dependencies]
-three-d = "0.12.1"
+three-d = { git = "https://github.com/asny/three-d" }
 
 [target.'cfg(not(target_arc = "wasm32"))'.dependencies]
 rand = "0.7"

@@ -1,3 +1,5 @@
+use std::ops::Mul;
+
 use rand::prelude::*;
 use three_d::*;
 
@@ -15,18 +17,17 @@ struct StarMaterial {
 
 impl Material for StarMaterial {
     fn fragment_shader_source(&self, _use_vertex_colors: bool, lights: &[&dyn Light]) -> String {
-        // let mut shader = lights_shader_source(lights, LightingModel::Blinn);
-        let mut shader = String::new();
+        let mut shader = lights_shader_source(lights, LightingModel::Blinn);
         shader.push_str(include_str!("star.frag"));
 
         shader
     }
 
     fn material_type(&self) -> MaterialType {
-        MaterialType::Transparent
+        MaterialType::Opaque
     }
 
-    fn use_uniforms(&self, program: &Program, camera: &Camera, lights: &[&dyn Light]) {
+    fn use_uniforms(&self, program: &Program, camera: &Camera, _lights: &[&dyn Light]) {
         program.use_uniform_if_required("cameraPosition", camera.position());
         program.use_uniform("uTime", self.time);
     }
@@ -37,13 +38,13 @@ impl Material for StarMaterial {
             depth_test: DepthTest::Always,
             blend: Blend::Enabled {
                 source_rgb_multiplier: BlendMultiplierType::SrcColor,
-                source_alpha_multiplier: BlendMultiplierType::Zero,
-                destination_rgb_multiplier: BlendMultiplierType::One,
-                destination_alpha_multiplier: BlendMultiplierType::One,
-                rgb_equation: BlendEquationType::Add,
+                source_alpha_multiplier: BlendMultiplierType::SrcAlpha,
+                destination_rgb_multiplier: BlendMultiplierType::DstColor,
+                destination_alpha_multiplier: BlendMultiplierType::DstAlpha,
+                rgb_equation: BlendEquationType::Max,
                 alpha_equation: BlendEquationType::Add,
             },
-            cull: Cull::Back,
+            cull: Cull::None,
         }
     }
 }
@@ -75,7 +76,7 @@ pub fn run() {
     for i in 0..TOTAL_STARS {
         let start_position = get_rng_vec3(true);
         let colors = get_rng_vec3(false);
-        let rotations = get_rng_vec3(false);
+        let rotations = get_rng_vec3(true);
         let scale = get_rng_vec3(false);
         start_positions.push(vec3(
             100.0 * start_position.x,
@@ -89,7 +90,11 @@ pub fn run() {
             80,
             255,
         );
-        start_rotations.push(Quaternion::from_axis_angle(start_positions[i as usize].normalize(), degrees(rotations.x * 360.0)));
+        start_rotations.push(
+            Quaternion::from_axis_angle(
+                start_positions[i as usize].normalize(), degrees(rotations.x * 360.0)
+            )
+        );
         start_scales.push(vec3(scale.x, scale.x, scale.x));
         part_colors.push(c);
     }
@@ -101,37 +106,33 @@ pub fn run() {
     };
     let mut stars = StarsParticle::new(start_positions, start_rotations,  start_scales, part_colors, &context, &cube);
 
-    let point_light = PointLight::new(
-        &context,
-        0.8,
-        Color::WHITE,
-        &vec3(0.0, 0.0, 0.0),
-        Attenuation { constant: 1.0, linear: 1.0, quadratic: 1.0 },
-    );
-
-    let ambient_light = AmbientLight::new(
-        &context,
-        1.0,
-        Color::WHITE,
-    );
-
     window
         .render_loop(move |frame_input| {
             let elapsed_time = (frame_input.elapsed_time * 0.001) as f32;
             stars.time += elapsed_time;
             star_material.time = stars.time;
 
-            // stars.set_transformation(Mat4::from_scale((t / 2.0).sin() / 2.0));
+            let mut mouse_position = vec2(0.0, 0.0);
+            for event in frame_input.events.iter() {
+                match event {
+                    Event::MouseMotion { position, .. } => {
+                        let pixel = (
+                            (frame_input.device_pixel_ratio * position.0) as f32,
+                            (frame_input.viewport.height as f64 - frame_input.device_pixel_ratio * position.1) as f32
+                        );
+                        mouse_position = vec2(pixel.0 as f32, pixel.1 as f32);
+                    }
+                    _ => {}
+                }
+            }
 
-            // stars.set_particles(&particles);
-
-            stars.update();
+            stars.update(mouse_position);
 
             frame_input
                 .screen()
                 .clear(ClearState::color(0.019, 0.003, 0.113, 1.0))
                 .write(|| {
-                    stars.instance.render_with_material(&star_material, &camera, &[&ambient_light])
+                    stars.instance.render_with_material(&star_material, &camera, &[])
                 });
 
             FrameOutput::default()
@@ -186,14 +187,18 @@ impl StarsParticle {
         }
     }
 
-    pub fn update(& mut self) {
+    // TODO use the mouse position to do things
+    pub fn update(& mut self, mouse_position: Vec2) {
+        let rotations =  Some(self.instances.rotations.as_mut().unwrap()).unwrap();
+        let scales = Some(self.instances.scales.as_mut().unwrap()).unwrap();
+        let translations = &mut self.instances.translations;
         for i in 0..TOTAL_STARS {
-            let rotations =  Some(self.instances.rotations.as_mut().unwrap()).unwrap();
-            rotations[i as usize] = Quaternion::from_axis_angle(
-                self.instances.translations[i as usize].normalize(), degrees(self.time * 100.0)
+            let rot = Quaternion::from_axis_angle(
+                translations[i as usize].normalize(), degrees(self.time / 2.0)
             );
 
-            let scales = Some(self.instances.scales.as_mut().unwrap()).unwrap();
+            rotations[i as usize] = rotations[i as usize].mul(rot);    
+
             scales[i as usize].x += (self.time * 2.0).cos() / 333.0;
             scales[i as usize].y += (self.time * 2.0).cos() / 333.0;
             scales[i as usize].z += (self.time * 2.0).cos() / 333.0;
@@ -203,6 +208,9 @@ impl StarsParticle {
         let rotating_y = Mat4::from_angle_y(degrees(3.0 * self.time));
 
         self.instance.set_instances(&self.instances);
-        self.instance.set_transformation(scaling.concat(&rotating_y));
+        self.instance.set_transformation(
+            scaling
+                .concat(&rotating_y)
+        );
     }
 }

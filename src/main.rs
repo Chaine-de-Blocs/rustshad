@@ -36,15 +36,8 @@ impl Material for StarMaterial {
         RenderStates {
             write_mask: WriteMask::COLOR_AND_DEPTH,
             depth_test: DepthTest::Always,
-            blend: Blend::Enabled {
-                source_rgb_multiplier: BlendMultiplierType::SrcColor,
-                source_alpha_multiplier: BlendMultiplierType::SrcAlpha,
-                destination_rgb_multiplier: BlendMultiplierType::DstColor,
-                destination_alpha_multiplier: BlendMultiplierType::DstAlpha,
-                rgb_equation: BlendEquationType::Max,
-                alpha_equation: BlendEquationType::Add,
-            },
-            cull: Cull::None,
+            blend: Blend::Disabled,
+            cull: Cull::Back,
         }
     }
 }
